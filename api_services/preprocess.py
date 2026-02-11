@@ -7,15 +7,21 @@ import os
 import sys
 import logging
 import argparse
-from flask import Flask, request, jsonify
-from PIL import Image
 import numpy as np
 import json
 import cv2
+from flask import Flask, request, jsonify
+from PIL import Image
+
+# 添加项目路径（必须在 from config 之前）
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_dir = os.path.join(current_dir, '..')
+sys.path.insert(0, project_dir)
+
+from config.api_config import get_path
 
 # 添加PreciseCam路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
-precisecam_path = os.path.join(current_dir, '..', '..', 'PreciseCam')
+precisecam_path = get_path('precisecam')
 sys.path.append(precisecam_path)
 
 try:
@@ -296,9 +302,17 @@ class PanoramaPreprocessor:
         logger.info(f"图片组 {group_id} 处理完成: {image_path}, 生成了{len(results)}个图像对")
         return results
     
-    def generate_interpolated_images_for_split(self, split_results: list, panorama1_path: str, panorama2_path: str, group_id: int):
-        """为切分结果生成插值图像"""
-        logger.info(f"开始生成插值图像，共有 {len(split_results)} 组数据")
+    def generate_interpolated_images_for_split(self, split_results: list, panorama1_path: str, panorama2_path: str, group_id: int, num_interpolations: int = 9):
+        """为切分结果生成插值图像
+        
+        Args:
+            split_results: 切分结果列表
+            panorama1_path: 第一张全景图路径
+            panorama2_path: 第二张全景图路径
+            group_id: 组ID
+            num_interpolations: 插值图像数量（默认9），生成从左到右的插值序列
+        """
+        logger.info(f"开始生成插值图像，共有 {len(split_results)} 组数据，每组生成 {num_interpolations} 个插值图像")
         
         interpolated_results = []
         
@@ -340,11 +354,17 @@ class PanoramaPreprocessor:
                 if len(panorama.shape) == 3 and panorama.shape[2] == 3:
                     panorama = cv2.cvtColor(panorama, cv2.COLOR_RGB2BGR)
                 
-                # 生成9组插值参数（0.9-0.1, 0.8-0.2, ..., 0.1-0.9）
-                # 在main_params（左图）和rand_params（右图）之间插值
-                # ToDo
-                interpolation_weights = [(0.9, 0.1), (0.8, 0.2), (0.7, 0.3), (0.6, 0.4), (0.5, 0.5), 
-                                        (0.4, 0.6), (0.3, 0.7), (0.2, 0.8), (0.1, 0.9)]
+                # 动态生成插值参数（在main_params（左图）和rand_params（右图）之间插值）
+                # 例如：num_interpolations=9 时，生成 [(0.9, 0.1), (0.8, 0.2), ..., (0.1, 0.9)]
+                #      num_interpolations=4 时，生成 [(0.8, 0.2), (0.6, 0.4), (0.4, 0.6), (0.2, 0.8)]
+                interpolation_weights = []
+                for i in range(1, num_interpolations + 1):
+                    # 从左到右：w1 递减，w2 递增
+                    w1 = (num_interpolations + 1 - i) / (num_interpolations + 1)
+                    w2 = i / (num_interpolations + 1)
+                    interpolation_weights.append((w1, w2))
+                
+                logger.info(f"生成 {num_interpolations} 个插值权重: {interpolation_weights}")
                 
                 # 只生成一组插值图像（从左到右的插值序列）
                 interpolated_images = []
@@ -460,16 +480,13 @@ def generate_interpolated_images():
         panorama1_path = data.get('panorama1_path', '')
         panorama2_path = data.get('panorama2_path', '')
         group_id = data.get('group_id', 0)
+        num_interpolations = data.get('num_interpolations', 9)  # 默认9个插值图像
         
-        if not split_results:
-            return jsonify({"error": "缺少split_results参数"}), 400
-        if not panorama1_path or not panorama2_path:
-            return jsonify({"error": "缺少panorama路径参数"}), 400
-        if not group_id:
-            return jsonify({"error": "缺少group_id参数"}), 400
+        if not all([split_results, panorama1_path, panorama2_path, group_id]):
+            return jsonify({"error": "缺少必要参数(split_results/panorama路径/group_id)"}), 400
         
         results = preprocessor.generate_interpolated_images_for_split(
-            split_results, panorama1_path, panorama2_path, group_id
+            split_results, panorama1_path, panorama2_path, group_id, num_interpolations
         )
         return jsonify({"success": True, "results": results})
         

@@ -12,6 +12,12 @@ import argparse
 import requests
 from typing import Dict, List
 
+# 添加配置路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+from config.api_config import get_path
+
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,10 +56,10 @@ def get_services_config(api_version='original'):
             'env_vars': {'CUDA_VISIBLE_DEVICES': gpu_id, 'HF_ENDPOINT': 'https://hf-mirror.com'},
             'args': [
                 '--port', str(base_port + 1),
-                '--osediff_path', '/root/siton-tmp/sx/xks/51_code/data_prepare/OSEDiff/preset/models/osediff.pkl',
-                '--pretrained_model_name_or_path', '/root/siton-tmp/sx/xks/models/AI-ModelScope/stable-diffusion-2-1-base',
-                '--ram_path', '/root/siton-tmp/sx/xks/51_code/data_prepare/OSEDiff/preset/models/ram_swin_large_14m.pth',
-                '--ram_ft_path', '/root/siton-tmp/sx/xks/51_code/data_prepare/OSEDiff/preset/models/DAPE.pth',
+                '--osediff_path', get_path('osediff_model'),
+                '--pretrained_model_name_or_path', get_path('pretrained_model'),
+                '--ram_path', get_path('ram_model'),
+                '--ram_ft_path', get_path('ram_ft_model'),
                 '--device', 'cuda',
                 '--upscale', '2',
                 '--process_size', '512',
@@ -68,8 +74,8 @@ def get_services_config(api_version='original'):
             'env_vars': {'CUDA_VISIBLE_DEVICES': gpu_id},
             'args': [
                 '--port', str(base_port + 2),
-                '--model_dir', '/root/siton-tmp/sx/xks/models/Qwen2.5-VL-7B-Instruct',
-                '--prompt_path', '/root/siton-tmp/sx/xks/51_code/data_prepare/qwen_filter/image_pair_quality_prompt.txt'
+                '--model_dir', get_path('qwen_model'),
+                '--prompt_path', get_path('quality_prompt')
             ],
             'log_suffix': log_suffix
         }

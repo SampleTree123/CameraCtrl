@@ -7,10 +7,14 @@ from PIL import Image
 import torch
 from torchvision import transforms
 
-# 配置路径
+# 配置路径（必须在 from config 之前）
 current_dir = os.path.dirname(os.path.abspath(__file__))
 full_process_dir = os.path.dirname(current_dir)
-osediff_path = os.path.join(full_process_dir, '..', 'OSEDiff')
+sys.path.insert(0, full_process_dir)
+
+from config.api_config import get_path
+
+osediff_path = get_path('osediff_repo')
 ram_path = os.path.join(osediff_path, 'ram')
 
 # 配置日志
@@ -42,10 +46,6 @@ try:
 except ImportError as e:
     logging.error(f"无法导入OSEDiff模块: {e}")
     sys.exit(1)
-
-# 设置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -148,83 +148,56 @@ class OSEDiffAPI:
     
     def process_single_image(self, input_image_path, output_dir, align_method='adain'):
         """处理单张图像 - 直接按照test_osediff.py的方式"""
-        try:
-            if not os.path.exists(input_image_path):
-                raise ValueError(f"输入图像不存在: {input_image_path}")
-            
-            logger.info(f"开始处理图像: {input_image_path}")
-            
-            # 读取图像
-            input_image = Image.open(input_image_path).convert('RGB')
-            
-            # 确保输入图像是8的倍数
-            ori_width, ori_height = input_image.size
-            rscale = self.upscale
-            resize_flag = False
-            if ori_width < self.process_size//rscale or ori_height < self.process_size//rscale:
-                scale = (self.process_size//rscale)/min(ori_width, ori_height)
-                input_image = input_image.resize((int(scale*ori_width), int(scale*ori_height)))
-                resize_flag = True
-            input_image = input_image.resize((input_image.size[0]*rscale, input_image.size[1]*rscale))
+        logger.info(f"开始处理图像: {input_image_path}")
+        
+        input_image = Image.open(input_image_path).convert('RGB')
+        
+        # 确保输入图像是8的倍数
+        ori_width, ori_height = input_image.size
+        rscale = self.upscale
+        resize_flag = False
+        if ori_width < self.process_size//rscale or ori_height < self.process_size//rscale:
+            scale = (self.process_size//rscale)/min(ori_width, ori_height)
+            input_image = input_image.resize((int(scale*ori_width), int(scale*ori_height)))
+            resize_flag = True
+        input_image = input_image.resize((input_image.size[0]*rscale, input_image.size[1]*rscale))
 
-            new_width = input_image.width - input_image.width % 8
-            new_height = input_image.height - input_image.height % 8
-            input_image = input_image.resize((new_width, new_height), Image.LANCZOS)
-            bname = os.path.basename(input_image_path)
-            
-            # 获取提示词
-            validation_prompt, lq = self.get_validation_prompt(input_image)
-            if not validation_prompt:
-                raise ValueError("无法生成提示词")
-            
-            logger.info(f"处理 {input_image_path}, 标签: {validation_prompt}")
-            
-            # 处理图像
-            with torch.no_grad():
-                lq = lq*2-1
-                output_image = model(lq, prompt=validation_prompt)
-                output_pil = transforms.ToPILImage()(output_image[0].cpu() * 0.5 + 0.5)
-                if align_method == 'adain':
-                    output_pil = adain_color_fix(target=output_pil, source=input_image)
-                elif align_method == 'wavelet':
-                    output_pil = wavelet_color_fix(target=output_pil, source=input_image)
-                else:
-                    pass
-                if resize_flag:
-                    output_pil = output_pil.resize((int(self.upscale*ori_width), int(self.upscale*ori_height)))
-            
-            # 规范输出目录为绝对路径
-            if not os.path.isabs(output_dir):
-                output_dir = os.path.abspath(os.path.join(original_cwd, output_dir))
-            # 确保osediff子目录存在
-            osediff_output_dir = os.path.join(output_dir, "osediff")
-            os.makedirs(osediff_output_dir, exist_ok=True)
-            
-            # 保存结果到osediff子目录
-            output_path = os.path.join(osediff_output_dir, bname)
-            output_pil.save(output_path)
-            
-            logger.info(f"超分辨率处理完成: {output_path}")
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"处理图像失败: {e}")
-            raise
+        new_width = input_image.width - input_image.width % 8
+        new_height = input_image.height - input_image.height % 8
+        input_image = input_image.resize((new_width, new_height), Image.LANCZOS)
+        
+        # 获取提示词并处理图像
+        validation_prompt, lq = self.get_validation_prompt(input_image)
+        logger.info(f"处理 {input_image_path}, 标签: {validation_prompt}")
+        
+        with torch.no_grad():
+            lq = lq*2-1
+            output_image = model(lq, prompt=validation_prompt)
+            output_pil = transforms.ToPILImage()(output_image[0].cpu() * 0.5 + 0.5)
+            if align_method == 'adain':
+                output_pil = adain_color_fix(target=output_pil, source=input_image)
+            elif align_method == 'wavelet':
+                output_pil = wavelet_color_fix(target=output_pil, source=input_image)
+            if resize_flag:
+                output_pil = output_pil.resize((int(self.upscale*ori_width), int(self.upscale*ori_height)))
+        
+        # 保存结果
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.abspath(os.path.join(original_cwd, output_dir))
+        osediff_output_dir = os.path.join(output_dir, "osediff")
+        os.makedirs(osediff_output_dir, exist_ok=True)
+        
+        output_path = os.path.join(osediff_output_dir, os.path.basename(input_image_path))
+        output_pil.save(output_path)
+        logger.info(f"超分辨率处理完成: {output_path}")
+        return output_path
     
     def get_validation_prompt(self, image, prompt=''):
-        """获取验证提示词 - 直接按照test_osediff.py的方式"""
-        try:
-            validation_prompt = ""
-            lq = tensor_transforms(image).unsqueeze(0).to(self.device)
-            lq_ram = ram_transforms(lq).to(dtype=weight_dtype)
-            captions = inference(lq_ram, ram_model)
-            validation_prompt = f"{captions[0]}, {prompt},"
-            
-            return validation_prompt, lq
-            
-        except Exception as e:
-            logger.error(f"获取提示词失败: {e}")
-            return "", None
+        """获取验证提示词"""
+        lq = tensor_transforms(image).unsqueeze(0).to(self.device)
+        lq_ram = ram_transforms(lq).to(dtype=weight_dtype)
+        captions = inference(lq_ram, ram_model)
+        return f"{captions[0]}, {prompt},", lq
 
 # 全局API实例
 osediff_api = None
@@ -234,26 +207,41 @@ def health_check():
     """健康检查"""
     return jsonify({"status": "healthy", "service": "osediff"})
 
-@app.route('/super_resolution', methods=['POST'])
-def super_resolution_endpoint():
-    """单张图像超分辨率"""
+@app.route('/super_resolution_batch', methods=['POST'])
+def super_resolution_batch_endpoint():
+    """批量图像超分辨率 - 一次请求处理多张图像
+    
+    返回结果只包含必要字段：success, output_path (error 仅在失败时)
+    """
     try:
         data = request.get_json()
-        input_path = data.get('input_path')
+        input_paths = data.get('input_paths', [])
         output_dir = data.get('output_dir', 'output/osediff')
         # 规范输出目录为绝对路径
         if output_dir and not os.path.isabs(output_dir):
             output_dir = os.path.abspath(os.path.join(original_cwd, output_dir))
         align_method = data.get('align_method', 'adain')
         
-        if not input_path:
-            return jsonify({"error": "缺少input_path参数"}), 400
+        if not input_paths:
+            return jsonify({"error": "缺少input_paths参数"}), 400
         
-        output_path = osediff_api.process_single_image(input_path, output_dir, align_method)
-        return jsonify({"success": True, "output_path": output_path})
+        logger.info(f"批量超分处理: {len(input_paths)} 张图像")
+        results = []
+        for input_path in input_paths:
+            try:
+                output_path = osediff_api.process_single_image(input_path, output_dir, align_method)
+                # 只返回必要字段，避免冗余传输
+                results.append({"success": True, "output_path": output_path})
+            except Exception as e:
+                logger.error(f"批量超分中单张处理失败: {input_path} - {e}")
+                results.append({"success": False, "output_path": None, "error": str(e)})
+        
+        success_count = sum(1 for r in results if r['success'])
+        logger.info(f"批量超分完成: {success_count}/{len(input_paths)} 成功")
+        return jsonify({"success": True, "results": results})
         
     except Exception as e:
-        logger.error(f"超分辨率处理失败: {e}")
+        logger.error(f"批量超分辨率处理失败: {e}")
         return jsonify({"error": str(e)}), 500
 
 def main():

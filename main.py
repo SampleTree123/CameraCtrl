@@ -18,6 +18,20 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "2,3"
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
+# 导入路径配置
+from config.api_config import BASE_DIR
+
+def resolve_path(path):
+    """将路径解析为绝对路径
+    
+    规则：
+    - 如果已经是绝对路径，直接返回
+    - 如果是相对路径，相对于 full_process_m3 目录解析
+    """
+    if os.path.isabs(path):
+        return path
+    return os.path.abspath(os.path.join(current_dir, path))
+
 
 # 设置日志
 def setup_logging(output_dir):
@@ -71,15 +85,19 @@ def main():
     parser.add_argument('--random_seed', type=int, default=42, help='随机种子')
     parser.add_argument('--api_version', type=str, choices=['original', 'shared_left'], 
                        default='original', help='API版本选择: original(端口5000-5002), shared_left(端口5010-5012)')
+    parser.add_argument('--num_interpolations', type=int, default=9, 
+                       help='插值图像数量（默认9），控制在两张图之间生成多少个插值帧')
     
     args = parser.parse_args()
     
     # 固定配置
     extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
     
-    # 转换为绝对路径
-    if not os.path.isabs(args.output_dir):
-        args.output_dir = os.path.abspath(args.output_dir)
+    # 转换输出目录为绝对路径
+    args.output_dir = resolve_path(args.output_dir)
+    
+    # 转换输入目录为绝对路径
+    args.input_dirs = [resolve_path(d) for d in args.input_dirs]
     
     # 设置日志
     logger = setup_logging(args.output_dir)
@@ -88,8 +106,11 @@ def main():
     processor = PanoramaProcessor(
         output_root_dir=args.output_dir, 
         api_version=args.api_version,
-        output_file='results.json'
+        output_file='results.json',
+        num_interpolations=args.num_interpolations
     )
+    
+    logger.info(f"插值配置: 每个图像对将生成 {args.num_interpolations} 个插值帧")
     
     # 收集所有图片路径
     all_image_paths = []
