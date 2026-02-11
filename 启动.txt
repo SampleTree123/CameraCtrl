@@ -1,0 +1,96 @@
+# ========================================
+# 检查服务状态
+# ========================================
+python start_services.py --action status
+python start_services_shared_left.py --action status
+
+# ========================================
+# 停止所有服务
+# ========================================
+python start_services.py --action stop
+python start_services_shared_left.py --action stop
+
+# ========================================
+# 启动API服务（后台运行）
+# ========================================
+# 原版服务（端口5000-5002，GPU 0）
+nohup python start_services.py --action start --output_dir "/root/siton-tmp/sx/xks/51_code/data_prepare/full_process_m3/big_data_gpu0_2" > api_start_ori.log 2>&1 &
+
+# 共享左图版本服务（端口5010-5012，GPU 1）
+nohup python start_services_shared_left.py --action start --output_dir "/root/siton-tmp/sx/xks/51_code/data_prepare/full_process_m3/big_data_gpu1_2" > api_start_ori_gpu1.log 2>&1 &
+
+# ========================================
+# 等待服务启动（建议等待30-120秒）
+# ========================================
+# 检查服务是否启动成功
+sleep 30
+python start_services.py --action status
+python start_services_shared_left.py --action status
+
+
+# ========================================
+# 运行主程序（后台运行）
+# ========================================
+# 原版API处理
+nohup python main.py \
+  --input_dirs \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/UE_data_first_last \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/F-360iSOD/stimulis \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/CVRG-Pano/all-rgb \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/360-SoD/360-SOD-tr/image \
+  --target_n 10000 \
+  --random_seed  2001 \
+  --output_dir /root/siton-tmp/sx/xks/51_code/data_prepare/full_process_m3/big_data_gpu0_2 \
+  --api_version original \
+  > useless_ori.log 2>&1 &
+
+# 共享左图版本API处理
+nohup python main.py \
+  --input_dirs \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/UE_data_first_last \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/F-360iSOD/stimulis \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/CVRG-Pano/all-rgb \
+    /root/siton-tmp/sx/xks/51_code/data_prepare/data/360-SoD/360-SOD-tr/image \
+  --target_n 10000 \
+  --random_seed  2002 \
+  --output_dir /root/siton-tmp/sx/xks/51_code/data_prepare/full_process_m3/big_data_gpu1_2 \
+  --api_version shared_left \
+  > useless_shared_left.log 2>&1 &
+
+# ========================================
+# 监控进度
+# ========================================
+# 查看处理日志
+# tail -f ori_output/panorama_processing.log
+# tail -f shared_left_output/panorama_processing.log
+
+# 查看后台任务
+# jobs
+
+# 查看进程
+# ps aux | grep "python.*main.py"
+
+# 查看GPU使用
+# watch -n 1 nvidia-smi
+
+# ========================================
+# 查看结果
+# ========================================
+# ls -lh ori_output/results.json
+# ls -lh shared_left_output/results.json
+# wc -l ori_output/results.json
+# wc -l shared_left_output/results.json
+
+
+
+
+python3 convert_to_final_format.py \
+  --input shared_left_output/results.json \
+  --output shared_left_output/full_format_300.json \
+  --num 300
+
+# 转换为 A1/A2/B1/B2 格式
+python3 convert_to_AB_format.py \
+  --input shared_left_output/results.json \
+  --output shared_left_output/AB_format_300.json \
+  --num 300
