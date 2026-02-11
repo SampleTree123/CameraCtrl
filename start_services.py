@@ -10,7 +10,9 @@ import time
 import logging
 import argparse
 import requests
+import socket
 from typing import Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 添加配置路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -177,10 +179,32 @@ class ServiceManager:
         for service_name in self.services:
             self.stop_service(service_name)
     
-    def check_service_health(self, service_name: str, port: int) -> bool:
-        """检查服务健康状态（单次检查）"""
+    def is_port_open(self, port: int, timeout: float = 0.5) -> bool:
+        """快速检查端口是否开放（避免HTTP超时）"""
         try:
-            response = requests.get(f"http://localhost:{port}/health", timeout=5)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex(('localhost', port))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
+    
+    def check_service_health(self, service_name: str, port: int) -> bool:
+        """检查服务健康状态（单次检查）
+        
+        优化：
+        1. 先快速检查端口是否开放（0.5秒）
+        2. 如果端口未开放，立即返回 False
+        3. 如果端口开放，再发送 HTTP 请求（1秒超时）
+        """
+        # 快速端口检查（避免5秒HTTP超时）
+        if not self.is_port_open(port, timeout=0.5):
+            return False
+        
+        # 端口开放，检查健康状态
+        try:
+            response = requests.get(f"http://localhost:{port}/health", timeout=1)
             return response.status_code == 200
         except Exception:
             return False
@@ -206,11 +230,12 @@ class ServiceManager:
             waited += interval
         return self.check_service_health(service_name, port)
     
-    def check_all_services_health(self, with_wait: bool = False) -> Dict[str, bool]:
+    def check_all_services_health(self, with_wait: bool = False, parallel: bool = True) -> Dict[str, bool]:
         """检查所有服务健康状态
         
         Args:
             with_wait: 是否等待服务就绪（启动后使用）
+            parallel: 是否并发检查（默认True，加快速度）
         """
         health_status = {}
         
@@ -221,19 +246,39 @@ class ServiceManager:
             'quality': 60
         }
         
-        for service_name, service_config in self.services.items():
-            port = service_config['port']
-            
-            if with_wait:
-                max_wait = max_wait_times.get(service_name, 30)
-                is_healthy = self.wait_for_service_healthy(service_name, port, max_wait=max_wait)
-            else:
+        if parallel and not with_wait:
+            # 并发检查所有服务（仅用于状态查询，不等待）
+            def check_single_service(service_name, port):
                 is_healthy = self.check_service_health(service_name, port)
+                status = "✅ 健康" if is_healthy else "❌ 异常"
+                logger.info(f"{service_name} 服务 (http://localhost:{port}) - {status}")
+                return service_name, is_healthy
             
-            health_status[service_name] = is_healthy
-            
-            status = "✅ 健康" if is_healthy else "❌ 异常"
-            logger.info(f"{service_name} 服务 ({port}): {status}")
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {}
+                for service_name, service_config in self.services.items():
+                    port = service_config['port']
+                    future = executor.submit(check_single_service, service_name, port)
+                    futures[future] = service_name
+                
+                for future in as_completed(futures):
+                    service_name, is_healthy = future.result()
+                    health_status[service_name] = is_healthy
+        else:
+            # 串行检查（用于启动后等待）
+            for service_name, service_config in self.services.items():
+                port = service_config['port']
+                
+                if with_wait:
+                    max_wait = max_wait_times.get(service_name, 30)
+                    is_healthy = self.wait_for_service_healthy(service_name, port, max_wait=max_wait)
+                else:
+                    is_healthy = self.check_service_health(service_name, port)
+                
+                health_status[service_name] = is_healthy
+                
+                status = "✅ 健康" if is_healthy else "❌ 异常"
+                logger.info(f"{service_name} 服务 (http://localhost:{port}) - {status}")
         
         return health_status
 
