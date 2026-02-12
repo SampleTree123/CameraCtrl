@@ -65,9 +65,17 @@ class QwenQualityEvaluator:
         """初始化Qwen模型"""
         logger.info("正在加载Qwen2.5-VL模型...")
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            self.model_dir, torch_dtype="auto", device_map="auto"
+            self.model_dir, 
+            torch_dtype="auto", 
+            device_map="auto",
+            local_files_only=True,
+            trust_remote_code=True
         )
-        self.processor = AutoProcessor.from_pretrained(self.model_dir)
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_dir,
+            local_files_only=True,
+            trust_remote_code=True
+        )
         logger.info("✅ Qwen2.5-VL模型加载完成")
     
     def _load_prompt(self):

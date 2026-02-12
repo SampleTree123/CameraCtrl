@@ -113,6 +113,9 @@ class OSEDiffAPI:
                     self.vae_encoder_tiled_size = 1024
                     self.latent_tiled_size = 96
                     self.latent_tiled_overlap = 32
+                    # 新增：支持本地模型路径
+                    self.local_files_only = True
+                    self.trust_remote_code = True
             
             args = Args(self.model_path, self.pretrained_model_name_or_path, self.ram_path, self.ram_ft_path, self.process_size, self.upscale, self.mixed_precision)
             
